@@ -9,8 +9,8 @@ import urllib2
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-
-#### FUNCTIONS 1.0
+#### FUNCTIONS 1.1
+import requests
 
 def validateFilename(filename):
     filenameregex = '^[a-zA-Z0-9]+_[a-zA-Z0-9]+_[a-zA-Z0-9]+_[0-9][0-9][0-9][0-9]_[0-9QY][0-9]$'
@@ -38,19 +38,24 @@ def validateFilename(filename):
 
 def validateURL(url):
     try:
-        r = urllib2.urlopen(url)
+        r = requests.get(url)
         count = 1
-        while r.getcode() == 500 and count < 4:
+        while r.status_code == 500 and count < 4:
             print ("Attempt {0} - Status code: {1}. Retrying.".format(count, r.status_code))
             count += 1
-            r = urllib2.urlopen(url)
+            r = requests.get(url)
         sourceFilename = r.headers.get('Content-Disposition')
-
         if sourceFilename:
             ext = os.path.splitext(sourceFilename)[1].replace('"', '').replace(';', '').replace(' ', '')
         else:
             ext = os.path.splitext(url)[1]
-        validURL = r.getcode() == 200
+        if 'application/pdf' in r.headers.get('content-type'):
+            ext = '.pdf'
+        elif 'text/plain' in r.headers.get('content-type'):
+            ext = '.csv'
+        elif 'text/csv' in r.headers.get('content-type'):
+            ext = '.csv'
+        validURL = r.status_code == 200
         validFiletype = ext.lower() in ['.csv', '.xls', '.xlsx', '.pdf']
         return validURL, validFiletype
     except:
@@ -82,52 +87,40 @@ def convert_mth_strings ( mth_string ):
         mth_string = mth_string.replace(k, v)
     return mth_string
 
-
 #### VARIABLES 1.0
 
-entity_id = "CCG07Y_HARCHNT_gov"
-url = "http://www.hrch.nhs.uk/about-us/publications-declarations/"
+entity_id = "FTRP6X_MEHNFT_gov"
+url = "https://www.moorfields.nhs.uk/content/financial-transparency"
 errors = 0
 data = []
-
 
 #### READ HTML 1.0
 
 html = urllib2.urlopen(url)
-soup = BeautifulSoup(html, "lxml")
-
+soup = BeautifulSoup(html, 'lxml')
 
 #### SCRAPE DATA
 
-title_divs = soup.find_all('div', id='panelGroupBody_28237')
-for title_div in title_divs:
-    blocks = title_div.find_all('a', 'link-asset ')+title_div.find_all('a', 'oLinkAsset ')+title_div.find_all('a', 'oLinkAssetXls ')
-    for block in blocks:
-        link = 'http://www.hrch.nhs.uk'+block['href']
-        title = block.text.strip()
-        if 'month' in title:
-            if '1-11' in title:
-                csvMth = 'Q0'
-                csvYr = title.split('/')[0][-4:]
-            if '9-12' in title:
-                csvMth = 'Q0'
-                csvYr = title.split('/')[0][-4:]
-            if '1-3' in title:
-                csvMth = 'Q1'
-                csvYr = title.split('/')[0][-4:]
-            if '4-8' in title:
-                csvMth = 'Q0'
-                csvYr = title.split('/')[0][-4:]
-            if ' all ' in title:
-                csvYr = 'Y1'
-                csvYr = title.split('/')[0][-4:]
-            csvMth = convert_mth_strings(csvMth.upper())
-            data.append([csvYr, csvMth, link])
+links_set = set()
+links = soup.find('a', text=re.compile('Financial transparency')).find_next('ul').find_all('a')
+for ls in links:
+    year_link = 'https://www.moorfields.nhs.uk'+ls['href']
+    html = urllib2.urlopen(year_link)
+    soup = BeautifulSoup(html, 'lxml')
+    related_files = soup.find('div', 'related').find_all('a')
+    for related_file in related_files:
+        url = related_file['href']
+        title = related_file.text
+        if '25k_0' in title:
+            csvYr = title.split('-')[0][-4:]
+            csvMth = 'Y1'
         else:
-            csvMth = title[:3]
-            csvYr = title[-4:]
-            csvMth = convert_mth_strings(csvMth.upper())
-            data.append([csvYr, csvMth, link])
+            csvMth = title.split()[4][:3]
+            csvYr = title.split()[5]
+        csvMth = convert_mth_strings(csvMth.upper())
+        data.append([csvYr, csvMth, url])
+
+
 
 #### STORE DATA 1.0
 
@@ -150,3 +143,4 @@ if errors > 0:
 
 
 #### EOF
+
